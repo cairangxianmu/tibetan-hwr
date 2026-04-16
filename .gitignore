@@ -36,6 +36,7 @@ desktop.ini
 
 # Logs
 *.log
+runs/
 
 # Uploaded images (web server temp files)
 web/static/uploads/
