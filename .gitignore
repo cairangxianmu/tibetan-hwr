@@ -17,9 +17,10 @@ venv/
 env/
 ENV/
 
-# 训练输出的模型权重文件
-checkpoint/
-checkpoint/*.pt
+# 训练输出的模型权重文件（只保留 best.pth，通过 Git LFS 管理）
+checkpoint/*.pth
+!checkpoint/digit_best.pth
+!checkpoint/letter_best.pth
 
 # IDE
 .idea/
