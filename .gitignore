@@ -10,7 +10,7 @@ build/
 .eggs/
 *.egg
 recognition/eval_digit.py
-impl/
+docs/
 # Virtual environments
 .venv/
 venv/
