@@ -3,7 +3,7 @@
 基于 PyTorch 的藏文手写**数字**（10 类）与**字母**（30 类）识别，配 FastAPI + Canvas 在线演示。
 
 - **端到端**：原始扫描图预处理 → 数据集构建 → CNN 训练 → Web 推理
-- **两款模型**：`DigitCNN`（~420K 参数）与 `LetterCNN`（~2.3M 参数，含 BatchNorm）
+- **两款模型**：`DigitCNN`（~420K 参数，含 BatchNorm）与 `LetterCNN`（~2.3M 参数，含 BatchNorm）
 - **开箱即用**：单命令训练、单命令启动 Web 服务，内置 TensorBoard 日志
 
 ---
@@ -88,18 +88,38 @@ python train.py --mode {digit|letter} [options]
 | 参数 | 默认值 | 说明 |
 |:-----|:------:|:-----|
 | `--mode` | *必填* | `digit` 或 `letter` |
-| `--epochs` | 30 | 训练轮数 |
+| `--epochs` | 30 | 最大训练轮数 |
 | `--lr` | 1e-3 | 初始学习率（Adam） |
 | `--batch-size` | 64 | 批大小 |
 | `--val-split` | 0.2 | 验证集比例（固定种子 42） |
+| `--patience` | 10 | 早停容忍 epoch 数；0 禁用 |
+| `--label-smoothing` | 0.1 | CrossEntropyLoss 标签平滑系数 |
+| `--weight-decay` | 1e-4 | Adam weight_decay |
+| `--save-every` | 5 | 每 N epoch 保存周期检查点 |
+| `--keep-ckpts` | 3 | 保留最近 N 个周期检查点；0 保留全部 |
 | `--data-root` | 自动 | 覆盖数据集路径 |
-| `--save-dir` | `../checkpoint/` | 最优权重保存目录 |
+| `--save-dir` | `../checkpoint/` | 权重保存目录 |
 | `--log-dir` | `../runs/` | 日志根目录 |
 | `--no-plot` | - | 禁用 matplotlib 曲线输出 |
 
-**训练配置**：Adam + `weight_decay=1e-4`，`CosineAnnealingLR` 退火到 `eta_min=1e-6`，`CrossEntropyLoss`。
+**训练配置**：Adam + `weight_decay=1e-4`，`CosineAnnealingLR` 退火到 `eta_min=1e-6`，`CrossEntropyLoss(label_smoothing=0.1)`。
 
-**数据增强**（仅训练集）：`RandomRotation(±10°)` + `RandomAffine(translate=5%)`。不使用翻转——藏文字母存在镜像相似对。
+**预处理**：所有图像在送入模型前经过 `GaussianBinarize`（高斯模糊 σ=1 → Otsu 二值化）。相比纯 Otsu，模糊步骤先消除抗锯齿噪点，使笔画连续性更好。
+
+**数据增强**（仅训练集，作用于灰度图后再二值化）：
+
+| 增强 | 参数 | 说明 |
+|:-----|:-----|:-----|
+| `RandomRotation` | ±15°，fill=255 | 覆盖书写倾斜范围 |
+| `RandomAffine` | translate=8%，scale=(0.85,1.15)，shear=±8° | 模拟字符大小与倾斜差异 |
+| `RandomPerspective` | distortion=0.2，p=0.4 | 模拟拍照视角偏差 |
+| `RandomErasing` | p=0.3，scale=(2%,15%) | 模拟笔画断裂/遮挡 |
+
+不使用翻转——藏文字母存在镜像相似对，翻转会直接污染标签。
+
+**早停**：验证准确率连续 `--patience` 个 epoch 无改善时自动停止，并恢复最优权重。
+
+**周期检查点**：每 `--save-every` 个 epoch 额外保存 `{mode}_epoch{N:04d}.pth`，自动轮转保留最近 `--keep-ckpts` 个。
 
 训练完成后，最优权重保存到 `checkpoint/{mode}_best.pth`，其中包含：
 
@@ -167,11 +187,19 @@ POST /predict
 
 `web/app.py` 在 `_preprocess` 中调用 `_tight_crop`：
 
-1. 找到暗像素（<200）的行/列边界框；
-2. 外扩 15% padding；
-3. 裁剪后以白色填充为正方形。
+推理预处理完整流程：
 
-经此裁剪，推理输入的字符占比与训练样本一致。手写与上传图片走同一路径。
+```
+原始图像（Canvas 或上传文件）
+  │
+  ▼  _tight_crop：找暗像素（<200）边界框 → 扩 15% padding → 裁剪 → 填充为正方形
+  ▼  Grayscale → Resize（28×28 或 64×64）
+  ▼  GaussianBinarize：高斯模糊（σ=1）→ Otsu 二值化
+  ▼  ToTensor → Normalize(mean=0.5, std=0.5)
+模型输入（与训练验证集分布一致）
+```
+
+手写与上传图片走同一路径，保证两种输入的表现一致。
 
 ---
 
