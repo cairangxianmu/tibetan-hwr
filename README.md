@@ -4,7 +4,10 @@ emoji: 🐠
 colorFrom: pink
 colorTo: red
 sdk: docker
+app_port: 7860
 pinned: false
+header: mini # 隐藏顶部栏
+disable_embedding: false # 允许嵌入
 license: mit
 short_description: 藏文手写数字与字母识别 · Tibetan Handwriting Recognition
 ---
@@ -67,9 +70,9 @@ tibetan-hwr/
 
 ## 数据集
 
-| 目录 | 尺寸 | 类别 | 样本数 |
-|:-----|:----:|:----:|:------:|
-| `TibetanMNIST28x28` | 28×28 | 10（数字 ༠–༩） | 17,768 |
+| 目录                 | 尺寸  |      类别      | 样本数 |
+| :------------------- | :---: | :------------: | :----: |
+| `TibetanMNIST28x28`  | 28×28 | 10（数字 ༠–༩） | 17,768 |
 | `TibetanLetter64x64` | 64×64 | 30（字母 ཀ–ཨ） | 77,636 |
 
 **下载**：[百度网盘](https://pan.baidu.com/s/1TnM9Rxue9ae0bhPJ2EUP8g?pwd=4ata)　提取码 `4ata`
@@ -90,10 +93,10 @@ dataset/
 
 从 [GitHub Releases](https://github.com/cairangxianmu/tibetan-hwr/releases/latest) 下载：
 
-| 文件 | 大小 | 验证准确率 |
-|:-----|:----:|:---------:|
-| `digit_best.pth` | 1.7 MB | 97.5% |
-| `letter_best.pth` | 8.4 MB | 99.0% |
+| 文件              |  大小  | 验证准确率 |
+| :---------------- | :----: | :--------: |
+| `digit_best.pth`  | 1.7 MB |   97.5%    |
+| `letter_best.pth` | 8.4 MB |   99.0%    |
 
 下载后放入 `checkpoint/` 目录，直接启动 Web 服务即可使用。
 
@@ -120,22 +123,22 @@ python train.py --mode {digit|letter} [options]
 
 **常用参数**
 
-| 参数 | 默认值 | 说明 |
-|:-----|:------:|:-----|
-| `--mode` | *必填* | `digit` 或 `letter` |
-| `--epochs` | 30 | 最大训练轮数 |
-| `--lr` | 1e-3 | 初始学习率（Adam） |
-| `--batch-size` | 64 | 批大小 |
-| `--val-split` | 0.2 | 验证集比例（固定种子 42） |
-| `--patience` | 10 | 早停容忍 epoch 数；0 禁用 |
-| `--label-smoothing` | 0.1 | CrossEntropyLoss 标签平滑系数 |
-| `--weight-decay` | 1e-4 | Adam weight_decay |
-| `--save-every` | 5 | 每 N epoch 保存周期检查点 |
-| `--keep-ckpts` | 3 | 保留最近 N 个周期检查点；0 保留全部 |
-| `--data-root` | 自动 | 覆盖数据集路径 |
-| `--save-dir` | `../checkpoint/` | 权重保存目录 |
-| `--log-dir` | `../runs/` | 日志根目录 |
-| `--no-plot` | - | 禁用 matplotlib 曲线输出 |
+| 参数                |      默认值      | 说明                                |
+| :------------------ | :--------------: | :---------------------------------- |
+| `--mode`            |      _必填_      | `digit` 或 `letter`                 |
+| `--epochs`          |        30        | 最大训练轮数                        |
+| `--lr`              |       1e-3       | 初始学习率（Adam）                  |
+| `--batch-size`      |        64        | 批大小                              |
+| `--val-split`       |       0.2        | 验证集比例（固定种子 42）           |
+| `--patience`        |        10        | 早停容忍 epoch 数；0 禁用           |
+| `--label-smoothing` |       0.1        | CrossEntropyLoss 标签平滑系数       |
+| `--weight-decay`    |       1e-4       | Adam weight_decay                   |
+| `--save-every`      |        5         | 每 N epoch 保存周期检查点           |
+| `--keep-ckpts`      |        3         | 保留最近 N 个周期检查点；0 保留全部 |
+| `--data-root`       |       自动       | 覆盖数据集路径                      |
+| `--save-dir`        | `../checkpoint/` | 权重保存目录                        |
+| `--log-dir`         |    `../runs/`    | 日志根目录                          |
+| `--no-plot`         |        -         | 禁用 matplotlib 曲线输出            |
 
 **训练配置**：Adam + `weight_decay=1e-4`，`CosineAnnealingLR` 退火到 `eta_min=1e-6`，`CrossEntropyLoss(label_smoothing=0.1)`。
 
@@ -143,12 +146,12 @@ python train.py --mode {digit|letter} [options]
 
 **数据增强**（仅训练集，作用于灰度图后再二值化）：
 
-| 增强 | 参数 | 说明 |
-|:-----|:-----|:-----|
-| `RandomRotation` | ±15°，fill=255 | 覆盖书写倾斜范围 |
-| `RandomAffine` | translate=8%，scale=(0.85,1.15)，shear=±8° | 模拟字符大小与倾斜差异 |
-| `RandomPerspective` | distortion=0.2，p=0.4 | 模拟拍照视角偏差 |
-| `RandomErasing` | p=0.3，scale=(2%,15%) | 模拟笔画断裂/遮挡 |
+| 增强                | 参数                                       | 说明                   |
+| :------------------ | :----------------------------------------- | :--------------------- |
+| `RandomRotation`    | ±15°，fill=255                             | 覆盖书写倾斜范围       |
+| `RandomAffine`      | translate=8%，scale=(0.85,1.15)，shear=±8° | 模拟字符大小与倾斜差异 |
+| `RandomPerspective` | distortion=0.2，p=0.4                      | 模拟拍照视角偏差       |
+| `RandomErasing`     | p=0.3，scale=(2%,15%)                      | 模拟笔画断裂/遮挡      |
 
 不使用翻转——藏文字母存在镜像相似对，翻转会直接污染标签。
 
@@ -168,12 +171,12 @@ python train.py --mode {digit|letter} [options]
 
 每次训练在 `runs/{mode}_{timestamp}/` 下生成：
 
-| 文件 | 内容 |
-|:-----|:-----|
-| `args.json` | 所有超参数、完整命令、设备信息 |
-| `metrics.csv` | 逐 epoch 的 loss / acc / lr / 耗时 |
-| `events.out.*` | TensorBoard 事件文件 |
-| `training_curves.png` | 损失与准确率曲线图 |
+| 文件                  | 内容                               |
+| :-------------------- | :--------------------------------- |
+| `args.json`           | 所有超参数、完整命令、设备信息     |
+| `metrics.csv`         | 逐 epoch 的 loss / acc / lr / 耗时 |
+| `events.out.*`        | TensorBoard 事件文件               |
+| `training_curves.png` | 损失与准确率曲线图                 |
 
 ```bash
 tensorboard --logdir runs/   # → http://localhost:6006
@@ -261,12 +264,12 @@ python image_processing/utils.py resize  --src  ./data_200 --dst ./data_64 --siz
 
 ## 依赖
 
-| 分组 | 包 |
-|:-----|:---|
-| 训练 | `torch` `torchvision` |
-| Web | `fastapi` `uvicorn` `pillow` `python-multipart` |
-| 预处理 | `opencv-python` `numpy` |
-| 可视化 | `matplotlib` `tensorboard` |
+| 分组   | 包                                              |
+| :----- | :---------------------------------------------- |
+| 训练   | `torch` `torchvision`                           |
+| Web    | `fastapi` `uvicorn` `pillow` `python-multipart` |
+| 预处理 | `opencv-python` `numpy`                         |
+| 可视化 | `matplotlib` `tensorboard`                      |
 
 ---
 
