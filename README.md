@@ -1,3 +1,14 @@
+---
+title: Tibetan Hwr
+emoji: 🐠
+colorFrom: pink
+colorTo: red
+sdk: docker
+pinned: false
+license: mit
+short_description: 藏文手写数字与字母识别 · Tibetan Handwriting Recognition
+---
+
 # Tibetan HWR · 藏文手写识别系统
 
 基于 PyTorch 的藏文手写**数字**（10 类）与**字母**（30 类）识别，配 FastAPI + Canvas 在线演示。
