@@ -1,2 +1,0 @@
-epoch,train_loss,train_acc,val_loss,val_acc,lr,elapsed_s
-1,0.606795,80.0,0.158991,95.2153,1.00e-06,30.64

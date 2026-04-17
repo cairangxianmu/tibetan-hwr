@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
@@ -60,6 +61,7 @@ def _load_model(mode: str) -> torch.nn.Module:
         return _model_cache[mode]
 
     ckpt_path = CHECKPOINT_DIR / f"{mode}_best.pth"
+    # ckpt_path = CHECKPOINT_DIR / f"{mode}_epoch0030.pth"
     if not ckpt_path.exists():
         raise FileNotFoundError(
             f"找不到模型文件：{ckpt_path}\n"
@@ -95,11 +97,71 @@ class PredictResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # 推理辅助函数
 # ---------------------------------------------------------------------------
+
+def _tight_crop(img_gray: Image.Image, pad_ratio: float = 0.15) -> Image.Image:
+    """
+    将灰度图裁剪到字符的紧边界框，并等比填充为正方形白色背景。
+
+    训练数据中每张图像的字符几乎铺满整帧；推理时画板是 400×400，
+    字符仅占中间一小块，直接缩放会导致字符极小，与训练分布不匹配。
+    此函数消除该差异，使推理输入与训练数据分布一致。
+
+    Args:
+        img_gray:  L 模式灰度图（白底黑字，背景 ~255，笔迹 ~0）
+        pad_ratio: 在紧边界框外再扩展的比例（相对于字符高/宽）
+    Returns:
+        裁剪并填充为正方形的灰度图；若图像全白则原样返回。
+    """
+    arr = np.array(img_gray)
+    # 找笔迹像素（暗像素，阈值 200 兼容轻笔压）
+    mask = arr < 200
+    rows = np.any(mask, axis=1)
+    cols = np.any(mask, axis=0)
+
+    if not rows.any():          # 画板为空，直接返回
+        return img_gray
+
+    rmin, rmax = int(np.where(rows)[0][[0, -1]].tolist()[0]), \
+                 int(np.where(rows)[0][[0, -1]].tolist()[1])
+    cmin, cmax = int(np.where(cols)[0][[0, -1]].tolist()[0]), \
+                 int(np.where(cols)[0][[0, -1]].tolist()[1])
+
+    char_h = rmax - rmin
+    char_w = cmax - cmin
+    pad    = max(4, int(max(char_h, char_w) * pad_ratio))
+
+    H, W = arr.shape
+    rmin = max(0, rmin - pad)
+    rmax = min(H - 1, rmax + pad)
+    cmin = max(0, cmin - pad)
+    cmax = min(W - 1, cmax + pad)
+
+    cropped = img_gray.crop((cmin, rmin, cmax + 1, rmax + 1))
+
+    # 等比填充为正方形（白色背景），避免后续 Resize 拉伸变形
+    cw, ch  = cropped.size
+    side    = max(cw, ch)
+    square  = Image.new("L", (side, side), 255)
+    square.paste(cropped, ((side - cw) // 2, (side - ch) // 2))
+    return square
+
+
 def _preprocess(image_data: bytes, mode: str) -> torch.Tensor:
-    """将原始图像字节解码并转换为模型输入张量（形状：1×1×H×W）。"""
-    img    = Image.open(io.BytesIO(image_data)).convert("RGB")
-    tfm    = get_inference_transform(mode)
-    tensor = tfm(img).unsqueeze(0)  # 增加 batch 维度
+    """
+    将原始图像字节解码并转换为模型输入张量（形状：1×1×H×W）。
+
+    处理步骤：
+        1. 解码图像 → 转灰度
+        2. 紧边界框裁剪（消除大量空白，对齐训练数据分布）
+        3. 转 RGB（兼容 get_inference_transform 中的 Grayscale 步骤）
+        4. Resize → GaussianBinarize（σ=1 模糊 + Otsu）→ ToTensor → Normalize
+    与训练预处理完全一致，保证推理输入分布不偏移。
+    """
+    img_gray = Image.open(io.BytesIO(image_data)).convert("L")
+    img_gray = _tight_crop(img_gray)
+    img      = img_gray.convert("RGB")
+    tfm      = get_inference_transform(mode)
+    tensor   = tfm(img).unsqueeze(0)
     return tensor.to(_device)
 
 

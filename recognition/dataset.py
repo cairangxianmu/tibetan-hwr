@@ -12,9 +12,26 @@ import os
 from pathlib import Path
 from typing import Optional
 
+import cv2
+import numpy as np
 import torch
+from PIL import Image
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
+
+
+class _NumericImageFolder(datasets.ImageFolder):
+    """ImageFolder 子类，按数值顺序排列类别文件夹（避免 "10" < "2" 的字母序错位）。"""
+
+    def find_classes(self, directory: str):
+        classes = sorted(
+            [d.name for d in os.scandir(directory) if d.is_dir()],
+            key=lambda x: int(x),
+        )
+        if not classes:
+            raise FileNotFoundError(f"找不到任何类别文件夹：{directory}")
+        class_to_idx = {cls: i for i, cls in enumerate(classes)}
+        return classes, class_to_idx
 
 
 # 默认数据集路径（相对于本文件的上两级目录自动推断）
@@ -43,30 +60,69 @@ LETTER_CHARS = {
 CHAR_MAPS = {"digit": DIGIT_CHARS, "letter": LETTER_CHARS}
 
 
+class GaussianBinarize:
+    """
+    高斯模糊（σ=1）→ Otsu 全局二值化。
+
+    接收 L 模式 PIL Image，输出同尺寸 L 模式二值图（0 / 255）。
+    先模糊消除抗锯齿噪点，再用 Otsu 自动确定最优阈值，
+    使笔画连续性与训练数据保持一致。
+    """
+    def __call__(self, img: Image.Image) -> Image.Image:
+        arr = np.array(img, dtype=np.uint8)
+        blurred = cv2.GaussianBlur(arr, (0, 0), sigmaX=1.0)
+        _, binary = cv2.threshold(blurred, 0, 255,
+                                  cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return Image.fromarray(binary, mode="L")
+
+
 def _build_transforms(mode: str, augment: bool = False):
     """
     构建图像预处理流水线。
 
-    训练时启用数据增强（随机旋转 + 随机平移），验证和推理时只做标准化。
+    训练时启用数据增强，验证和推理时只做标准化。
     digit 模式目标尺寸 28×28，letter 模式目标尺寸 64×64。
+
+    训练流水线：
+        Grayscale → Resize → [几何增强（灰度图）] → GaussianBinarize
+        → ToTensor → Normalize → RandomErasing
+
+    几何增强在灰度图上执行（双线性插值自然过渡），之后统一二值化，
+    避免在二值图上插值产生灰色污染像素。fill=255 保证露出区域为白色背景。
+
+    验证/推理流水线（不变）：
+        Grayscale → Resize → GaussianBinarize → ToTensor → Normalize
     """
     size = 28 if mode == "digit" else 64
-    # 归一化到 [-1, 1]，与训练时保持一致
     normalize = transforms.Normalize(mean=(0.5,), std=(0.5,))
 
     if augment:
         return transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),  # 转为单通道灰度图
+            transforms.Grayscale(num_output_channels=1),
             transforms.Resize((size, size)),
-            transforms.RandomRotation(10),                # 随机旋转 ±10°
-            transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),  # 随机平移 5%
+            # ── 几何增强（作用于灰度图，保留自然抗锯齿边缘）──────────
+            transforms.RandomRotation(15, fill=255),
+            transforms.RandomAffine(
+                degrees=0,
+                translate=(0.08, 0.08),
+                scale=(0.85, 1.15),
+                shear=(-8, 8),
+                fill=255,
+            ),
+            transforms.RandomPerspective(distortion_scale=0.2, p=0.4, fill=255),
+            # ── 几何增强完成后统一二值化 ──────────────────────────────
+            GaussianBinarize(),
             transforms.ToTensor(),
             normalize,
+            # ── Tensor 级别增强（value=1.0 对应归一化后的白色背景）──
+            transforms.RandomErasing(p=0.3, scale=(0.02, 0.15),
+                                     ratio=(0.3, 3.3), value=1.0),
         ])
     else:
         return transforms.Compose([
             transforms.Grayscale(num_output_channels=1),
             transforms.Resize((size, size)),
+            GaussianBinarize(),
             transforms.ToTensor(),
             normalize,
         ])
@@ -109,7 +165,7 @@ def get_dataloaders(
         )
 
     # 使用 ImageFolder，子文件夹名自动作为类别标签
-    full_dataset = datasets.ImageFolder(
+    full_dataset = _NumericImageFolder(
         root=str(root),
         transform=_build_transforms(mode, augment=True),
     )
@@ -125,7 +181,7 @@ def get_dataloaders(
     )
 
     # 验证集单独构建无增强的 ImageFolder，确保评估结果不受数据增强干扰
-    val_ds.dataset = datasets.ImageFolder(
+    val_ds.dataset = _NumericImageFolder(
         root=str(root),
         transform=_build_transforms(mode, augment=False),
     )

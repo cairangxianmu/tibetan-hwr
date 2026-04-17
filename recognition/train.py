@@ -6,15 +6,17 @@ train.py — 藏文手写识别模型训练入口
     python train.py --mode letter --epochs 50 --lr 0.0005 --batch-size 128
 
 每次运行在 runs/{mode}_{timestamp}/ 下生成：
-    args.json          — 运行参数与终端命令
-    metrics.csv        — 逐 epoch 训练指标
-    events.out.*       — TensorBoard 事件文件（tensorboard --logdir runs/）
+    args.json           — 运行参数与终端命令
+    metrics.csv         — 逐 epoch 训练指标
+    events.out.*        — TensorBoard 事件文件（tensorboard --logdir runs/）
     training_curves.png — 损失与准确率曲线图
 
 训练完成后，最优模型保存到 checkpoint/{mode}_best.pth。
+每隔 --save-every 个 epoch 另外保存周期检查点 checkpoint/{mode}_epoch{N:04d}.pth。
 """
 
 import argparse
+import copy
 import csv
 import json
 import sys
@@ -98,6 +100,47 @@ def format_duration(seconds: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 早停
+# ---------------------------------------------------------------------------
+
+class EarlyStopping:
+    """
+    监控验证准确率，连续 patience 个 epoch 无改善时触发早停。
+
+    Args:
+        patience: 容忍的连续不改善 epoch 数；0 表示禁用早停。
+        delta:    最小改善量，小于此值视为无改善（防止噪声触发）。
+    """
+
+    def __init__(self, patience: int = 10, delta: float = 1e-4):
+        self.patience = patience
+        self.delta    = delta
+        self.best_acc = 0.0
+        self.counter  = 0
+        self.best_state: dict | None = None
+
+    def step(self, val_acc: float, model: nn.Module) -> bool:
+        """
+        用当前验证准确率更新状态。
+
+        Returns:
+            True 表示应触发早停，False 表示继续训练。
+        """
+        if val_acc > self.best_acc + self.delta:
+            self.best_acc   = val_acc
+            self.counter    = 0
+            self.best_state = copy.deepcopy(model.state_dict())
+        else:
+            self.counter += 1
+        return self.patience > 0 and self.counter >= self.patience
+
+    def restore(self, model: nn.Module):
+        """将模型权重恢复到记录的最优状态。"""
+        if self.best_state is not None:
+            model.load_state_dict(self.best_state)
+
+
+# ---------------------------------------------------------------------------
 # 日志工具
 # ---------------------------------------------------------------------------
 
@@ -143,6 +186,32 @@ class CSVLogger:
 
 
 # ---------------------------------------------------------------------------
+# 周期性检查点保存
+# ---------------------------------------------------------------------------
+
+def _save_periodic(model, epoch: int, args, num_classes: int, save_dir: Path):
+    """保存当前 epoch 的周期检查点，并删除超出 keep_ckpts 数量限制的旧文件。"""
+    path = save_dir / f"{args.mode}_epoch{epoch:04d}.pth"
+    torch.save(
+        {
+            "epoch":            epoch,
+            "mode":             args.mode,
+            "num_classes":      num_classes,
+            "model_state_dict": model.state_dict(),
+            "is_periodic":      True,
+        },
+        path,
+    )
+    print(f"  周期检查点已保存：{path.name}")
+
+    # 保留最近 keep_ckpts 个，删除多余旧文件
+    if args.keep_ckpts > 0:
+        ckpts = sorted(save_dir.glob(f"{args.mode}_epoch*.pth"))
+        for old in ckpts[: -args.keep_ckpts]:
+            old.unlink()
+
+
+# ---------------------------------------------------------------------------
 # 可视化
 # ---------------------------------------------------------------------------
 
@@ -163,7 +232,6 @@ def plot_curves(history: dict, save_path: Path, mode: str):
     fig, (ax_loss, ax_acc) = plt.subplots(1, 2, figsize=(12, 4))
     fig.suptitle(f"Training Curves — {mode}", fontsize=13)
 
-    # 损失曲线
     ax_loss.plot(epochs, history["train_loss"], label="Train Loss", color="#2196F3")
     ax_loss.plot(epochs, history["val_loss"],   label="Val Loss",   color="#F44336", linestyle="--")
     ax_loss.set_xlabel("Epoch")
@@ -172,7 +240,6 @@ def plot_curves(history: dict, save_path: Path, mode: str):
     ax_loss.legend()
     ax_loss.grid(True, alpha=0.3)
 
-    # 准确率曲线
     ax_acc.plot(epochs, history["train_acc"], label="Train Acc", color="#2196F3")
     ax_acc.plot(epochs, history["val_acc"],   label="Val Acc",   color="#F44336", linestyle="--")
     ax_acc.set_xlabel("Epoch")
@@ -197,24 +264,31 @@ def parse_args():
         "--mode", choices=["digit", "letter"], required=True,
         help="训练模式：digit（10 类数字）或 letter（30 类字母）"
     )
-    parser.add_argument("--epochs",      type=int,   default=30,   help="训练轮数")
-    parser.add_argument("--lr",          type=float, default=1e-3, help="初始学习率")
-    parser.add_argument("--batch-size",  type=int,   default=64,   help="批大小")
-    parser.add_argument("--val-split",   type=float, default=0.2,  help="验证集比例")
-    parser.add_argument("--data-root",   type=str,   default=None, help="覆盖默认数据集路径")
-    parser.add_argument(
-        "--save-dir", type=str, default=None,
-        help="模型保存目录（默认：../checkpoint/）"
-    )
-    parser.add_argument("--num-workers", type=int,   default=0,    help="DataLoader 子进程数")
-    parser.add_argument(
-        "--log-dir", type=str, default=None,
-        help="日志根目录（默认：../runs/）；每次运行在其下建子目录"
-    )
-    parser.add_argument(
-        "--no-plot", action="store_true",
-        help="禁用 matplotlib 曲线图输出"
-    )
+    parser.add_argument("--epochs",          type=int,   default=30,   help="最大训练轮数")
+    parser.add_argument("--lr",              type=float, default=1e-3, help="初始学习率")
+    parser.add_argument("--batch-size",      type=int,   default=64,   help="批大小")
+    parser.add_argument("--val-split",       type=float, default=0.2,  help="验证集比例")
+    parser.add_argument("--data-root",       type=str,   default=None, help="覆盖默认数据集路径")
+    parser.add_argument("--save-dir",        type=str,   default=None,
+                        help="模型保存目录（默认：../checkpoint/）")
+    parser.add_argument("--num-workers",     type=int,   default=0,    help="DataLoader 子进程数")
+    parser.add_argument("--log-dir",         type=str,   default=None,
+                        help="日志根目录（默认：../runs/）；每次运行在其下建子目录")
+    parser.add_argument("--no-plot",         action="store_true",
+                        help="禁用 matplotlib 曲线图输出")
+    # ── 泛化性 / 正则化 ──────────────────────────────────────────────────────
+    parser.add_argument("--label-smoothing", type=float, default=0.1,
+                        help="CrossEntropyLoss 标签平滑系数（0 禁用）")
+    parser.add_argument("--weight-decay",    type=float, default=1e-4,
+                        help="Adam weight_decay 参数")
+    # ── 早停 ─────────────────────────────────────────────────────────────────
+    parser.add_argument("--patience",        type=int,   default=10,
+                        help="早停容忍 epoch 数（验证准确率连续无改善）；0 禁用早停")
+    # ── 周期性保存 ────────────────────────────────────────────────────────────
+    parser.add_argument("--save-every",      type=int,   default=5,
+                        help="每 N 个 epoch 保存一次周期检查点；0 禁用")
+    parser.add_argument("--keep-ckpts",      type=int,   default=0,
+                        help="周期检查点最大保留数量；0 保留全部")
     return parser.parse_args()
 
 
@@ -266,14 +340,14 @@ def main():
     print(f"模型：{model.__class__.__name__}（{total_params:,} 个参数）")
 
     if writer:
-        # 写入模型图（使用一个 dummy batch）
         dummy = torch.zeros(1, 1, 28 if args.mode == "digit" else 64,
                             28 if args.mode == "digit" else 64).to(device)
         writer.add_graph(model, dummy)
 
     # ── 优化器 / 调度器 ─────────────────────────────────────────────────────
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr,
+                           weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
     # ── Checkpoint 路径 ──────────────────────────────────────────────────────
@@ -284,9 +358,15 @@ def main():
     save_dir.mkdir(parents=True, exist_ok=True)
     best_path = save_dir / f"{args.mode}_best.pth"
 
+    # ── 早停初始化 ────────────────────────────────────────────────────────────
+    early_stopper = EarlyStopping(patience=args.patience)
+    if args.patience > 0:
+        print(f"早停：patience={args.patience} epoch")
+
     # ── 训练主循环 ───────────────────────────────────────────────────────────
     best_val_acc = 0.0
     history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+    stopped_early = False
 
     print(f"\n{'Epoch':>6}  {'训练损失':>10}  {'训练准确率':>10}  {'验证损失':>8}  {'验证准确率':>9}  {'耗时':>6}")
     print("-" * 65)
@@ -334,14 +414,35 @@ def main():
             best_val_acc = val_acc
             torch.save(
                 {
-                    "epoch": epoch,
-                    "mode": args.mode,
-                    "num_classes": num_classes,
+                    "epoch":            epoch,
+                    "mode":             args.mode,
+                    "num_classes":      num_classes,
                     "model_state_dict": model.state_dict(),
-                    "val_acc": val_acc,
+                    "val_acc":          val_acc,
                 },
                 best_path,
             )
+
+        # 周期性保存
+        if args.save_every > 0 and epoch % args.save_every == 0:
+            _save_periodic(model, epoch, args, num_classes, save_dir)
+
+        # 早停检查
+        if early_stopper.step(val_acc, model):
+            print(
+                f"\n早停触发：连续 {args.patience} 个 epoch 验证准确率无改善，"
+                f"最优 {early_stopper.best_acc:.2f}%"
+            )
+            early_stopper.restore(model)
+            stopped_early = True
+            # 早停时保存当前（恢复后）的周期检查点
+            if args.save_every > 0 and epoch % args.save_every != 0:
+                _save_periodic(model, epoch, args, num_classes, save_dir)
+            break
+
+    # ── 末尾 epoch 周期保存（未被整除且未早停时） ──────────────────────────
+    if not stopped_early and args.save_every > 0 and args.epochs % args.save_every != 0:
+        _save_periodic(model, args.epochs, args, num_classes, save_dir)
 
     # ── 收尾 ─────────────────────────────────────────────────────────────────
     csv_logger.close()
@@ -349,7 +450,7 @@ def main():
         writer.close()
 
     print(f"\n训练完成，最优验证准确率：{best_val_acc:.2f}%")
-    print(f"模型已保存至：{best_path}")
+    print(f"最优模型：{best_path}")
 
     if not args.no_plot:
         plot_curves(history, run_dir / "training_curves.png", mode=args.mode)

@@ -9,6 +9,7 @@ dist/
 build/
 .eggs/
 *.egg
+recognition\eval_digit.py
 
 # Virtual environments
 .venv/

@@ -17,19 +17,21 @@ class DigitCNN(nn.Module):
     用于藏文数字识别的轻量 CNN，输入 1×28×28 灰度图，输出 10 类。
 
     网络结构：
-        卷积块 1：Conv(1→32, 3×3) → ReLU → MaxPool(2)      28×28 → 14×14
-        卷积块 2：Conv(32→64, 3×3) → ReLU → MaxPool(2)     14×14 → 7×7
+        卷积块 1：Conv(1→32, 3×3) → BN → ReLU → MaxPool(2)   28×28 → 14×14
+        卷积块 2：Conv(32→64, 3×3) → BN → ReLU → MaxPool(2)  14×14 → 7×7
         分类头：  Flatten → FC(3136→128) → Dropout(0.5) → FC(128→类别数)
     """
 
     def __init__(self, num_classes: int = 10):
         super().__init__()
-        # 特征提取部分：两层卷积 + 最大池化
+        # 特征提取部分：两层卷积 + BatchNorm + 最大池化
         self.features = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),          # 28×28 → 14×14
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),          # 14×14 → 7×7
         )

@@ -166,8 +166,8 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Upload area ───────────────────────────────────────────────────────────────
-uploadArea.addEventListener('click', () => fileInput.click());
-
+// uploadArea is now a <label>, click-to-open is handled natively.
+// We still need drag-and-drop support.
 uploadArea.addEventListener('dragover', e => {
   e.preventDefault();
   uploadArea.classList.add('drag-over');

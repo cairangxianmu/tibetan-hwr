@@ -1,187 +1,211 @@
-# Tibetan HWR — 藏文手写识别系统
+# Tibetan HWR · 藏文手写识别系统
 
-基于 PyTorch 的藏文手写数字与字母识别，含 Web 展示界面。
+基于 PyTorch 的藏文手写**数字**（10 类）与**字母**（30 类）识别，配 FastAPI + Canvas 在线演示。
+
+- **端到端**：原始扫描图预处理 → 数据集构建 → CNN 训练 → Web 推理
+- **两款模型**：`DigitCNN`（~420K 参数）与 `LetterCNN`（~2.3M 参数，含 BatchNorm）
+- **开箱即用**：单命令训练、单命令启动 Web 服务，内置 TensorBoard 日志
+
+---
+
+## 快速开始
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 准备数据集（见下方「数据集」）
+#    放置后目录应为 dataset/TibetanMNIST28x28/ 与 dataset/TibetanLetter64x64/
+
+# 3. 训练
+cd recognition
+python train.py --mode digit  --epochs 30
+python train.py --mode letter --epochs 50 --batch-size 128
+
+# 4. 启动 Web 服务
+cd ./web
+uvicorn app:app --port 8000
+# → http://localhost:8000
+```
+
+---
 
 ## 项目结构
 
 ```
 tibetan-hwr/
-├── dataset/                    # 软链接 → 原始数据集目录
-│   ├── TibetanMNIST28x28/      # 10 类数字，28×28 PNG
-│   └── TibetanLetter64x64/     # 30 类字母，64×64 PNG
-├── image_processing/           # 扫描图像预处理模块
-│   ├── __init__.py
-│   ├── letter_processor.py     # 从红色格线方格纸提取字母
-│   ├── digit_processor.py      # 从手写数字扫描图提取数字
-│   └── utils.py                # 重命名 / 去红线 / 批量缩放
-├── checkpoint/                 # 训练输出的模型权重文件
-│   ├── digit_best.pth
-│   └── letter_best.pth
-├── recognition/
-│   ├── dataset.py              # DataLoader 工厂（digit / letter 双模式）
-│   ├── model.py                # CNN 模型定义（DigitCNN / LetterCNN）
-│   └── train.py                # 训练入口（含可视化与日志）
-├── runs/                       # 训练日志（每次运行生成带时间戳的子目录）
-│   └── {mode}_{timestamp}/
-│       ├── args.json           # 超参数与终端命令
-│       ├── metrics.csv         # 逐 epoch 指标
-│       ├── events.out.*        # TensorBoard 事件文件
-│       └── training_curves.png # 损失与准确率曲线图
-├── web/
-│   ├── app.py                  # FastAPI 后端（从 checkpoint/ 加载模型）
-│   └── static/
-│       ├── index.html
-│       ├── style.css
-│       └── app.js
-├── requirements.txt
-├── .gitignore
-└── README.md
+├── dataset/                 # 数据集（需自行放置）
+│   ├── TibetanMNIST28x28/   #  10 类数字，28×28 PNG，17,768 张
+│   └── TibetanLetter64x64/  #  30 类字母，64×64 PNG，77,636 张
+├── image_processing/        # 原始扫描图预处理（可选）
+│   ├── letter_processor.py  #  红格纸 → 单字母
+│   ├── digit_processor.py   #  深色底 → 单数字
+│   └── utils.py             #  重命名 / 去红线 / 批量缩放
+├── recognition/             # 训练与模型
+│   ├── model.py             #  DigitCNN / LetterCNN
+│   ├── dataset.py           #  DataLoader 工厂 + 字符映射表
+│   └── train.py             #  训练入口
+├── checkpoint/              # 训练输出的模型权重（{mode}_best.pth）
+├── runs/                    # 训练日志（按时间戳分目录）
+├── web/                     # Web 服务
+│   ├── app.py               #  FastAPI 后端
+│   └── static/              #  前端（Canvas + 原生 JS）
+└── requirements.txt
 ```
+
+---
 
 ## 数据集
 
 | 目录 | 尺寸 | 类别 | 样本数 |
-|------|------|------|--------|
-| `dataset/TibetanMNIST28x28/` | 28×28 | 10（数字 ༠–༩） | 17,768 |
-| `dataset/TibetanLetter64x64/` | 64×64 | 30（字母 ཀ–ཨ） | 77,636 |
+|:-----|:----:|:----:|:------:|
+| `TibetanMNIST28x28` | 28×28 | 10（数字 ༠–༩） | 17,768 |
+| `TibetanLetter64x64` | 64×64 | 30（字母 ཀ–ཨ） | 77,636 |
 
-数据集下载：[百度网盘](https://pan.baidu.com/s/1TnM9Rxue9ae0bhPJ2EUP8g?pwd=4ata)　提取码：`4ata`
+**下载**：[百度网盘](https://pan.baidu.com/s/1TnM9Rxue9ae0bhPJ2EUP8g?pwd=4ata)　提取码 `4ata`
 
-下载后将 `TibetanMNIST28x28` 与 `TibetanLetter64x64` 两个文件夹放入 `dataset/` 目录。
+下载后解压为以下结构：
 
-## 安装依赖
-
-```bash
-pip install -r requirements.txt
+```
+dataset/
+├── TibetanMNIST28x28/{0..9}/*.png
+└── TibetanLetter64x64/{0..29}/*.png
 ```
 
-| 分组 | 包 | 用途 |
-|------|-----|------|
-| 训练 | `torch` `torchvision` | 模型训练与推理 |
-| Web  | `fastapi` `uvicorn` `pillow` `python-multipart` | 后端服务 |
-| 预处理 | `opencv-python` `numpy` | 图像处理流水线 |
-| 可视化 | `matplotlib` `tensorboard` | 训练曲线图 / TensorBoard 日志 |
+子文件夹名即类别标签，数据集遵循 `torchvision.datasets.ImageFolder` 约定。
 
-## 图像预处理（image_processing）
+---
 
-如果你有原始扫描手写表单，可通过预处理模块提取单字符图像。
-
-**提取字母**（红色格线方格纸，8×12 格）：
-
-```bash
-python image_processing/letter_processor.py \
-    --input  /path/to/scanned_sheets/ \
-    --output /path/to/output/
-```
-
-**提取数字**（深色背景手写数字）：
-
-```bash
-python image_processing/digit_processor.py \
-    --input  /path/to/digit_sheets/ \
-    --output /path/to/output/
-```
-
-**工具函数**：
-
-```bash
-# 批量重命名
-python image_processing/utils.py rename --dir ./data
-
-# 去除残留红色格线
-python image_processing/utils.py replace --dir ./data
-
-# 批量缩放到 64×64
-python image_processing/utils.py resize --src ./data_200 --dst ./data_64 --size 64
-```
-
-## 训练模型
+## 训练
 
 ```bash
 cd recognition
-
-# 训练数字模型（10 类，约 30 epoch）
-python train.py --mode digit --epochs 30
-
-# 训练字母模型（30 类，约 50 epoch）
-python train.py --mode letter --epochs 50
+python train.py --mode {digit|letter} [options]
 ```
 
-常用参数：
+**常用参数**
 
 | 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--mode` | 必填 | `digit` 或 `letter` |
+|:-----|:------:|:-----|
+| `--mode` | *必填* | `digit` 或 `letter` |
 | `--epochs` | 30 | 训练轮数 |
-| `--lr` | 0.001 | 初始学习率 |
+| `--lr` | 1e-3 | 初始学习率（Adam） |
 | `--batch-size` | 64 | 批大小 |
-| `--val-split` | 0.2 | 验证集比例 |
-| `--data-root` | 自动检测 | 覆盖数据集路径 |
-| `--save-dir` | `../checkpoint/` | 模型保存目录 |
+| `--val-split` | 0.2 | 验证集比例（固定种子 42） |
+| `--data-root` | 自动 | 覆盖数据集路径 |
+| `--save-dir` | `../checkpoint/` | 最优权重保存目录 |
 | `--log-dir` | `../runs/` | 日志根目录 |
-| `--no-plot` | 否 | 禁用 matplotlib 曲线图输出 |
+| `--no-plot` | - | 禁用 matplotlib 曲线输出 |
 
-训练完成后，最优模型自动保存到 `checkpoint/{mode}_best.pth`。
+**训练配置**：Adam + `weight_decay=1e-4`，`CosineAnnealingLR` 退火到 `eta_min=1e-6`，`CrossEntropyLoss`。
 
-## 训练日志与可视化
+**数据增强**（仅训练集）：`RandomRotation(±10°)` + `RandomAffine(translate=5%)`。不使用翻转——藏文字母存在镜像相似对。
 
-每次训练在 `runs/{mode}_{timestamp}/` 下自动生成以下文件：
+训练完成后，最优权重保存到 `checkpoint/{mode}_best.pth`，其中包含：
+
+```python
+{"epoch": ..., "mode": "digit"|"letter", "num_classes": ..., "model_state_dict": ..., "val_acc": ...}
+```
+
+---
+
+## 训练日志
+
+每次训练在 `runs/{mode}_{timestamp}/` 下生成：
 
 | 文件 | 内容 |
-|------|------|
-| `args.json` | 所有超参数、完整终端命令、设备信息、时间戳 |
-| `metrics.csv` | 逐 epoch 的训练损失、验证损失、准确率、学习率、耗时 |
-| `events.out.*` | TensorBoard 事件文件（Loss / Accuracy / LR / 模型图） |
-| `training_curves.png` | 损失与准确率双图，训练结束后自动保存 |
-
-**查看 TensorBoard：**
+|:-----|:-----|
+| `args.json` | 所有超参数、完整命令、设备信息 |
+| `metrics.csv` | 逐 epoch 的 loss / acc / lr / 耗时 |
+| `events.out.*` | TensorBoard 事件文件 |
+| `training_curves.png` | 损失与准确率曲线图 |
 
 ```bash
-tensorboard --logdir runs/
-# 浏览器访问 http://localhost:6006
+tensorboard --logdir runs/   # → http://localhost:6006
 ```
 
-支持同时对比多次训练运行，面板包含 Loss、Accuracy、LR 折线图及模型计算图。
+---
 
-**不需要曲线图时跳过输出：**
-
-```bash
-python train.py --mode digit --epochs 30 --no-plot
-```
-
-**自定义日志目录：**
-
-```bash
-python train.py --mode letter --epochs 50 --log-dir /path/to/logs
-```
-
-## 启动 Web 服务
+## Web 服务
 
 ```bash
 cd web
-uvicorn app:app --reload --port 8000
+uvicorn app:app --port 8000   # 加 --reload 开启热更新
 ```
 
-浏览器访问 [http://localhost:8000](http://localhost:8000)
+**前端功能**
 
-## Web 功能
+- 模式切换（数字 / 字母），切换时清空画板
+- 400×400 Canvas，支持鼠标 & 触屏，可调笔画粗细（4–32 px）
+- **逐笔撤销**（Ctrl+Z）——每次落笔前拍 `ImageData` 快照入栈
+- 图片上传（点击或拖拽），自动居中缩放到画板
+- 识别结果：目标字符、置信度进度条、Top-5 候选
 
-- **模式切换**：顶部 Tab 切换数字 / 字母识别
-- **手写输入**：Canvas 画板，支持鼠标和触屏；可调笔画粗细；支持逐笔撤销（Ctrl+Z）
-- **图片上传**：点击上传区域或拖拽图片
-- **识别结果**：显示识别字符、置信度进度条、Top-5 候选列表
+**API**
 
-## API
-
-```
+```http
 GET  /health
      → {"status": "ok", "device": "cpu"}
 
 POST /predict
-     Body:     {"image": "<base64>", "mode": "digit" | "letter"}
-     Response: {"label": 0, "character": "༠", "confidence": 98.5,
-                "top5": [{"label":0,"character":"༠","confidence":98.5}, ...]}
+     Request:  {"image": "<base64 | data URL>", "mode": "digit" | "letter"}
+     Response: {
+       "label":      3,
+       "character":  "༣",
+       "confidence": 97.42,
+       "top5": [{"label": 3, "character": "༣", "confidence": 97.42}, ...]
+     }
 ```
+
+模型采用**懒加载**：服务启动不加载任何权重，首次收到某模式请求时才从磁盘读入并缓存。
+
+---
+
+## 推理预处理
+
+前端 Canvas 尺寸 400×400，但用户书写的字符通常只占画板中间一小块。若直接把整张画板缩放到 28×28 或 64×64，字符会被极度缩小，与训练数据（字符铺满整帧）分布不一致，识别率会明显下降。
+
+`web/app.py` 在 `_preprocess` 中调用 `_tight_crop`：
+
+1. 找到暗像素（<200）的行/列边界框；
+2. 外扩 15% padding；
+3. 裁剪后以白色填充为正方形。
+
+经此裁剪，推理输入的字符占比与训练样本一致。手写与上传图片走同一路径。
+
+---
+
+## 原始扫描图预处理（可选）
+
+若你有手写原始扫描纸（红色格线方格纸），可用 `image_processing/` 将整张表单切分为单字符图像：
+
+```bash
+# 字母：红色格线方格纸（8×12 格）
+python image_processing/letter_processor.py --input  sheets/ --output out/
+
+# 数字：深色背景手写纸
+python image_processing/digit_processor.py  --input  sheets/ --output out/
+
+# 工具函数
+python image_processing/utils.py rename  --dir  ./data
+python image_processing/utils.py replace --dir  ./data                  # 去残留红线
+python image_processing/utils.py resize  --src  ./data_200 --dst ./data_64 --size 64
+```
+
+详细流程见系列博客「TibetanHWR 系列二：OpenCV 图像预处理」。
+
+---
+
+## 依赖
+
+| 分组 | 包 |
+|:-----|:---|
+| 训练 | `torch` `torchvision` |
+| Web | `fastapi` `uvicorn` `pillow` `python-multipart` |
+| 预处理 | `opencv-python` `numpy` |
+| 可视化 | `matplotlib` `tensorboard` |
+
+---
 
 ## 引用
 
