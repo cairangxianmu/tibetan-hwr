@@ -14,16 +14,15 @@
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 准备数据集（见下方「数据集」）
+# 2. 下载预训练模型（推荐，跳过训练直接体验）
+#    从 GitHub Releases 下载 digit_best.pth 和 letter_best.pth，放入 checkpoint/
+#    https://github.com/cairangxianmu/tibetan-hwr/releases/latest
+
+# 3. 准备数据集（可选，仅需重新训练时）
 #    放置后目录应为 dataset/TibetanMNIST28x28/ 与 dataset/TibetanLetter64x64/
 
-# 3. 训练
-cd recognition
-python train.py --mode digit  --epochs 30
-python train.py --mode letter --epochs 50 --batch-size 128
-
 # 4. 启动 Web 服务
-cd ./web
+cd web
 uvicorn app:app --port 8000
 # → http://localhost:8000
 ```
@@ -73,6 +72,19 @@ dataset/
 ```
 
 子文件夹名即类别标签，数据集遵循 `torchvision.datasets.ImageFolder` 约定。
+
+---
+
+## 预训练模型
+
+无需训练，直接从 [GitHub Releases](https://github.com/cairangxianmu/tibetan-hwr/releases/latest) 下载：
+
+| 文件 | 大小 | 验证准确率 |
+|:-----|:----:|:---------:|
+| `digit_best.pth` | 1.7 MB | 97.5% |
+| `letter_best.pth` | 8.4 MB | 99.0% |
+
+下载后放入 `checkpoint/` 目录，直接启动 Web 服务即可使用。
 
 ---
 
