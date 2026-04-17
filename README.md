@@ -77,7 +77,7 @@ dataset/
 
 ## 预训练模型
 
-无需训练，直接从 [GitHub Releases](https://github.com/cairangxianmu/tibetan-hwr/releases/latest) 下载：
+从 [GitHub Releases](https://github.com/cairangxianmu/tibetan-hwr/releases/latest) 下载：
 
 | 文件 | 大小 | 验证准确率 |
 |:-----|:----:|:---------:|
