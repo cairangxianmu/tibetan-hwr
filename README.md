@@ -88,6 +88,18 @@ dataset/
 
 ---
 
+## 训练曲线
+
+**数字模型**（30 epoch，val_acc 97.5%）
+
+![digit training curves](assets/digit_training_curves.png)
+
+**字母模型**（50 epoch，val_acc 99.0%）
+
+![letter training curves](assets/letter_training_curves.png)
+
+---
+
 ## 训练
 
 ```bash
