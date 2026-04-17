@@ -16,6 +16,7 @@ docs/
 venv/
 env/
 ENV/
+docs/
 
 # 训练输出的模型权重文件（只保留 best.pth，通过 Git LFS 管理）
 checkpoint/*.pth
